@@ -1,65 +1,43 @@
 package com.kevin.algo.indicators;
 
-import com.kevin.algo.core.Candle;
-import com.kevin.algo.dsa.ArrayQueue;
+import java.util.LinkedList;
+import java.util.Queue;
 
 /**
- * SMA (Simple Moving Average)
- * ---------------------------
- * Rolling average of 'close' over the last N bars.
- *
- * Implementation details:
- *  - Stores the last N closes in a circular ArrayQueue (double[])
- *  - Maintains a running 'sum' so updates are O(1):
- *      * When queue not full: offer(close), sum += close
- *      * When full:
- *          old = poll()       // remove oldest
- *          sum -= old
- *          offer(close)
- *          sum += close
- *  - value() returns sum / windowSize when ready, else Double.NaN
+ * Simple Moving Average (rolling window)
  */
-public class SMA implements Indicator {
+public class SMA {
 
-    private final int window;
-    private final ArrayQueue q;
+    private final int period;
+    private final Queue<Double> window = new LinkedList<>();
     private double sum = 0.0;
-    private int seen = 0; // total bars seen (helps with readiness)
 
-    public SMA(int window) {
-        if (window <= 0) throw new IllegalArgumentException("window must be > 0");
-        this.window = window;
-        this.q = new ArrayQueue(window);
-    }
+    public SMA(int period) { this.period = period; }
 
-    @Override
-    public void accumulate(Candle bar) {
-        double close = bar.getClose();
-        if (q.isFull()) {
-            // remove oldest value from sum, then add the new one
-            double old = q.poll();
-            sum -= old;
-            q.offer(close);
-            sum += close;
-        } else {
-            q.offer(close);
-            sum += close;
+    /** Add a new value and update the moving average */
+    public void add(double price) {
+        sum += price;
+        window.add(price);
+        if (window.size() > period) {
+            sum -= window.remove();
         }
-        seen++;
     }
 
-    @Override
+    /** Convenience overload if your Candle class calls this */
+    public void accumulate(com.kevin.algo.core.Candle bar) {
+        add(bar.getClose());
+    }
+
+    /** Is SMA ready (enough samples)? */
     public boolean isReady() {
-        // ready when we have at least 'window' closes
-        return q.size() == window;
+        return window.size() >= period;
     }
 
-    @Override
+    /** Current SMA value; NaN if not ready */
     public double value() {
-        return isReady() ? (sum / window) : Double.NaN;
+        return isReady() ? sum / window.size() : Double.NaN;
     }
 
-    /** For debugging/inspection (not required). */
-    public int window() { return window; }
-    public int samples() { return seen; }
+    /** Optional: last n samples for debug */
+    public int size() { return window.size(); }
 }

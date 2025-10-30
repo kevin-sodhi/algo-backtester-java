@@ -6,44 +6,45 @@ import java.util.List;
 /**
  * Result
  * ------
- * Plain container for backtest outputs. 
- *   - params      : arbitrary key/value notes about the run (fast/slow, file path, etc.)
- *   - metrics     : common KPIs (trades, netPnl, sharpe, maxDrawdown)
- *   - equityCurve : running account value over time (pairs of t & eq)
- *
- * Why i not used  records/maps only?
- *   - POJO keeps type-safety + easy JSON marshalling with Gson.
- *   - We can grow it later (ex: per-trade ledger) without breaking callers.
+ * Final container for backtest outputs.
+ * JSON-serializable with Gson.
  */
-
 public class Result {
 
-    /** Small struct for name/value metrics. */
-    public static class Metrics {
-        public int trades;
-        public double netPnl;       // absolute P&L (e.g., dollars)
-        public double sharpe;       // placeholder; compute later
-        public double maxDrawdown;  // -0.12 = -12% (fraction)
+    /** Params about this run */
+    public static class Params {
+        public String csv, strategy;
+        public int fast, slow;
+        public double cash, fee, slip;
     }
 
-    /** One equity point (time label + equity value). */
+    /** Core metrics */
+    public static class Metrics {
+        public int trades;
+        public double netPnl;
+        public double sharpe;
+        public double maxDrawdown;
+        public int barsRead;
+        public double winRatePct;
+        public double totalReturnPct;
+    }
+
+    /** One equity point (time label + equity value) */
     public static class EquityPoint {
-        public String t;   // time label (ISO date string for now)
-        public double eq;  // equity value (e.g., 100000.0)
+        public String t;
+        public double eq;
         public EquityPoint() {}
         public EquityPoint(String t, double eq) { this.t = t; this.eq = eq; }
     }
 
-    // ---- Result body ----
-    private final java.util.Map<String, Object> params = new java.util.HashMap<>();
-    private final Metrics metrics = new Metrics();
-    private final List<EquityPoint> equityCurve = new ArrayList<>();
+    // ---- Main result body ----
+    public boolean ok;
+    public String message;
+    public Params params = new Params();
+    public Metrics metrics = new Metrics();
 
-    public java.util.Map<String, Object> getParams() { return params; }
-    public Metrics getMetrics() { return metrics; }
-    public List<EquityPoint> getEquityCurve() { return equityCurve; }
-
-    // helpers to make wiring easy later:
-    public Result putParam(String key, Object value) { params.put(key, value); return this; }
-    public Result addPoint(String t, double eq) { equityCurve.add(new EquityPoint(t, eq)); return this; }
+    // These lists connect directly to the front-end
+    public List<com.kevin.algo.models.BarOut> series = new ArrayList<>();
+    public List<com.kevin.algo.models.Signal> signals = new ArrayList<>();
+    public List<com.kevin.algo.models.EquityPoint> equity = new ArrayList<>();
 }

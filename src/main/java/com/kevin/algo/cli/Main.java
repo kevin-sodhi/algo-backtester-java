@@ -2,112 +2,142 @@ package com.kevin.algo.cli;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.Map;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.kevin.algo.core.Candle;
-import com.kevin.algo.data.CsvDataFeed;    
+import com.google.gson.TypeAdapter;    
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonWriter;
+import com.kevin.algo.data.CsvDataFeed;
 import com.kevin.algo.data.DataFeed;
+import com.kevin.algo.engine.BacktestEngine;
 import com.kevin.algo.indicators.SMA;
+import com.kevin.algo.portfolio.Portfolio;
+import com.kevin.algo.strategy.MovingAverageCrossover;
 
 /**
  * Main.java (Milestone 2)
  * -----------------------
  * Reads a CSV, computes SMA(fast) and SMA(slow), prints real values in JSON.
  * Next milestone: add Strategy + BacktestEngine for trades & equity curve.
+ * 
+ * cd algo-backtester-java
+ * mvn -q clean package -DskipTests
+ * java -jar target/algo-backtester-java-1.0.0-jar-with-dependencies.jar --csv data/my.csv --fast 3 --slow 5 --strategy macrossover
  */
 public class Main {
 
-    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final Gson GSON = new GsonBuilder()
+    .registerTypeAdapter(LocalDate.class, new TypeAdapter<LocalDate>() {
+        @Override
+        public void write(JsonWriter out, LocalDate value) throws java.io.IOException {
+            // Serialize LocalDate as ISO string (yyyy-MM-dd)
+            out.value(value != null ? value.toString() : null);
+        }
+        @Override
+        public LocalDate read(JsonReader in) throws java.io.IOException {
+            String s = in.nextString();
+            return (s == null) ? null : LocalDate.parse(s);
+        }
+    })
+    .setPrettyPrinting()
+    .create();
 
     public static void main(String[] args) {
-        // 1) Parse flags
+
+
+        // 1) CLI Parse flags
         Map<String, String> flags = parseArgs(args);
         String csv = flags.getOrDefault("csv", "");
-        String fast = flags.getOrDefault("fast", "");
-        String slow = flags.getOrDefault("slow", "");
         String strategy = flags.getOrDefault("strategy", "macrossover");
+        int fast = tryParseInt(flags.get("fast"), 3);
+        int slow = tryParseInt(flags.get("slow"), 5);
+        double cash = tryParseDouble(flags.get("cash"), 10000.0);
+        double fee  = tryParseDouble(flags.get("fee"), 0.0);
+        double slip = tryParseDouble(flags.get("slip"), 0.0);
 
-        // 2) Response scaffold
-        Map<String, Object> response = new HashMap<>();
-        response.put("ok", true);
+        
 
-        Map<String, Object> params = new HashMap<>();
-        params.put("csv", csv);
-        params.put("fast", tryParseInt(fast, null));
-        params.put("slow", tryParseInt(slow, null));
-        params.put("strategy", strategy);
-        response.put("params", params);
-
-        // 3) Validate numeric input
-        Integer fastN = tryParseInt(fast, null);
-        Integer slowN = tryParseInt(slow, null);
-        if (csv == null || csv.isEmpty() || fastN == null || slowN == null) {
-            response.put("ok", false);
-            response.put("error", "Missing/invalid flags. Example: --csv data/sample.csv --fast 5 --slow 20");
-            System.out.println(GSON.toJson(response));
-            return;
-        }
-
-        // 3b) Validate the CSV path and make it absolute (so relative paths never break)
+        // 2️⃣ Validate CSV
         Path csvPath = Path.of(csv).toAbsolutePath();
+        Map<String, Object> response = new HashMap<>();
         if (!Files.exists(csvPath)) {
             response.put("ok", false);
-            response.put("error", "CSV not found at: " + csvPath);
+            response.put("error", "CSV not found: " + csvPath);
             System.out.println(GSON.toJson(response));
             return;
         }
-
-        // 4) Build feed + indicators
+        // 3️⃣ Init components
         DataFeed feed = new CsvDataFeed(csvPath.toString());
-        SMA smaFast = new SMA(fastN);
-        SMA smaSlow = new SMA(slowN);
+        SMA smaFast = new SMA(fast);
+        SMA smaSlow = new SMA(slow);
+        MovingAverageCrossover strat = new MovingAverageCrossover();
+        Portfolio pf = new Portfolio(cash, fee, slip);
+        BacktestEngine engine = new BacktestEngine();
 
-        // 5) Stream CSV into indicators
-        int bars = 0;
-        while (feed.hasNext()) {
-            Candle bar = feed.next();
-            smaFast.accumulate(bar);
-            smaSlow.accumulate(bar);
-            bars++;
-        }
+        // 4️⃣ Run engine
+        BacktestEngine.Output out = engine.run(feed, smaFast, smaSlow, strat, pf);
+        // 5️⃣ Compute simple metrics
+        int barsRead = out.series.size();
+        int trades = pf.closedTrades().size();
+        double finalEquity = pf.finalEquity(out.series.get(barsRead - 1).close);
+        double totalReturnPct = (finalEquity / cash - 1.0) * 100.0;
 
-        // 6) Populate real metrics (no equity curve yet)
         Map<String, Object> metrics = new HashMap<>();
-        metrics.put("barsRead", bars);
-        metrics.put("smaFastReady", smaFast.isReady());
-        metrics.put("smaSlowReady", smaSlow.isReady());
-        metrics.put("smaFastValue", smaFast.value()); // NaN until ready
-        metrics.put("smaSlowValue", smaSlow.value());
+        metrics.put("barsRead", barsRead);
+        metrics.put("trades", trades);
+        metrics.put("totalReturnPct", totalReturnPct);
+
+        // 6️⃣ Assemble JSON
+        Map<String, Object> params = new HashMap<>();
+        params.put("csv", csv);
+        params.put("strategy", strategy);
+        params.put("fast", fast);
+        params.put("slow", slow);
+        params.put("cash", cash);
+        params.put("fee", fee);
+        params.put("slip", slip);
+
+        response.put("ok", true);
+        response.put("message", "Backtest complete");
+        response.put("params", params);
         response.put("metrics", metrics);
+        response.put("series", out.series);
+        response.put("signals", out.signals);
+        response.put("equity", out.equity);
 
-        response.put("equityCurve", null);
-        response.put("message", "CSV parsed and SMA computed. Next: Strategy + Engine.");
-
-        // 7) Print JSON
+        // 7️⃣ Print JSON
         System.out.println(GSON.toJson(response));
     }
 
-    /** Parses args like: --key value */
+    /** ---------------- Utility helpers ------------------ */
+
     private static Map<String, String> parseArgs(String[] args) {
         Map<String, String> map = new HashMap<>();
         for (int i = 0; i < args.length; i++) {
             String token = args[i];
             if (token.startsWith("--")) {
-                String key = token.substring(2).trim();
-                String value = "";
-                if (i + 1 < args.length && !args[i + 1].startsWith("--")) { value = args[i + 1]; i++; }
-                map.put(key, value);
+                String key = token.substring(2);
+                String val = "";
+                if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
+                    val = args[++i];
+                }
+                map.put(key, val);
             }
         }
         return map;
     }
 
-    /** Safe integer parsing. */
-    private static Integer tryParseInt(String s, Integer fallback) {
+    private static int tryParseInt(String s, int fallback) {
         try { return (s == null || s.isEmpty()) ? fallback : Integer.parseInt(s); }
-        catch (NumberFormatException nfe) { return fallback; }
+        catch (NumberFormatException e) { return fallback; }
+    }
+
+    private static double tryParseDouble(String s, double fallback) {
+        try { return (s == null || s.isEmpty()) ? fallback : Double.parseDouble(s); }
+        catch (NumberFormatException e) { return fallback; }
     }
 }
