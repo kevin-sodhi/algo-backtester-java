@@ -28,6 +28,14 @@ import com.kevin.algo.strategy.MovingAverageCrossover;
  * mvn -q clean package -DskipTests
  * java -jar target/algo-backtester-java-1.0.0-jar-with-dependencies.jar --csv data/my.csv --fast 3 --slow 5 --strategy macrossover
  */
+
+// mvn -q clean package -DskipTests
+// java -jar target/algo-backtester-java-1.0.0-jar-with-dependencies.jar \
+//  --csv data/TSLA.csv \
+//  --fast 3 \
+//  --slow 5 \
+//  --strategy macrossover
+// 
 public class Main {
 
     private static final Gson GSON = new GsonBuilder()
